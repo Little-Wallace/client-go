@@ -863,6 +863,7 @@ func (c *RegionCache) OnSendFail(bo *Backoffer, ctx *RPCContext, scheduleReload 
 			var currentProxyIdx AccessIndex = -1
 			if ctx.ProxyStore != nil {
 				currentProxyIdx = ctx.ProxyAccessIdx
+				atomic.AddUint64(&ctx.ProxyStore.noForwarding, 1)
 			}
 			// In case the epoch of the store is increased, try to avoid reloading the current region by also
 			// increasing the epoch stored in `rs`.
@@ -871,7 +872,6 @@ func (c *RegionCache) OnSendFail(bo *Backoffer, ctx *RPCContext, scheduleReload 
 				_, store := r.getStore().accessStore(TiKVOnly, currentProxyIdx)
 				currentAddr = store.addr
 			}
-			rs.accessStore(TiKVOnly, currentProxyIdx)
 			rs.switchNextProxyStore(r, currentProxyIdx, incEpochStoreIdx)
 			nextIdx := r.getStore().proxyTiKVIdx
 			addr := "null"
@@ -882,7 +882,7 @@ func (c *RegionCache) OnSendFail(bo *Backoffer, ctx *RPCContext, scheduleReload 
 			logutil.Logger(bo.GetCtx()).Info("switch region proxy peer to next due to send request fail",
 				zap.Bool("needReload", scheduleReload),
 				zap.Int("currentIdx", currentProxyIdx),
-				zap.Int("currentAddr", currentAddr),
+				zap.Stringer("currentAddr", currentAddr),
 				zap.Int("nextIdx", nextIdx),
 				zap.Int("nextAddress", addr),
 				zap.Stringer("current", ctx),
@@ -1495,7 +1495,8 @@ func (c *RegionCache) getProxyStore(region *Region, store *Store, rs *RegionStor
 
 	// If the current selected peer is not reachable, switch to the next one, until a reachable peer is found or all
 	// peers are checked.
-	for i := 0; i < tikvNum; i++ {
+	maxFailStore := uint64(0)
+	for i := 0; i < tikvNum * 2; i++ {
 		index := (i + first) % tikvNum
 		// Skip work store which is the actual store to be accessed
 		if index == int(workStoreIdx) {
@@ -1506,9 +1507,12 @@ func (c *RegionCache) getProxyStore(region *Region, store *Store, rs *RegionStor
 		if atomic.LoadInt32(&store.needForwarding) != 0 {
 			continue
 		}
-
-		rs.setProxyStoreIdx(region, AccessIndex(index))
-		return store, AccessIndex(index), storeIdx
+		failCount := atomic.LoadUint64(&store.noForwarding)
+		if failCount <= maxFailStore {
+			rs.setProxyStoreIdx(region, AccessIndex(index))
+			return store, AccessIndex(index), storeIdx
+		}
+		maxFailStore = failCount
 	}
 
 	return nil, 0, 0
@@ -1936,6 +1940,8 @@ type Store struct {
 	// forwarded by other stores. this is also the flag that a checkUntilHealth goroutine is running for this store.
 	// this mechanism is currently only applicable for TiKV stores.
 	needForwarding int32
+
+	noForwarding   uint64
 }
 
 type resolveState uint64
