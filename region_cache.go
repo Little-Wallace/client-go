@@ -866,10 +866,26 @@ func (c *RegionCache) OnSendFail(bo *Backoffer, ctx *RPCContext, scheduleReload 
 			}
 			// In case the epoch of the store is increased, try to avoid reloading the current region by also
 			// increasing the epoch stored in `rs`.
+			currentAddr := "null"
+			if currentProxyIdx >= 0 {
+				_, store := r.getStore().accessStore(TiKVOnly, currentProxyIdx)
+				currentAddr = store.addr
+			}
+			rs.accessStore(TiKVOnly, currentProxyIdx)
 			rs.switchNextProxyStore(r, currentProxyIdx, incEpochStoreIdx)
+			nextIdx := r.getStore().proxyTiKVIdx
+			addr := "null"
+			if nextIdx >= 0 {
+				_, store := r.getStore().accessStore(TiKVOnly,nextIdx)
+				addr = store.addr
+			}
 			logutil.Logger(bo.GetCtx()).Info("switch region proxy peer to next due to send request fail",
-				zap.Stringer("current", ctx),
 				zap.Bool("needReload", scheduleReload),
+				zap.Int("currentIdx", currentProxyIdx),
+				zap.Int("currentAddr", currentAddr),
+				zap.Int("nextIdx", nextIdx),
+				zap.Int("nextAddress", addr),
+				zap.Stringer("current", ctx),
 				zap.Error(err))
 		} else {
 			rs.switchNextTiKVPeer(r, ctx.AccessIdx)
