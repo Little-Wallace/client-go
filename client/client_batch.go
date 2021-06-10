@@ -574,6 +574,7 @@ func (c *batchCommandsClient) batchRecvLoop(cfg config.TiKVClient, tikvTransport
 	}()
 
 	epoch := atomic.LoadUint64(&c.epoch)
+	retryTime := 0
 	for {
 		resp, err := streamClient.recv()
 		if err != nil {
@@ -583,6 +584,14 @@ func (c *batchCommandsClient) batchRecvLoop(cfg config.TiKVClient, tikvTransport
 			if streamClient.forwardedHost != "" {
 				timer := time.NewTimer(time.Second)
 				<-timer.C
+				retryTime += 1
+				if retryTime > 5 {
+					if c.tryLockForSend() {
+						delete(c.forwardedClients, streamClient.forwardedHost)
+						c.unlockForSend()
+						return
+					}
+				}
 			}
 			logutil.BgLogger().Info(
 				"batchRecvLoop fails when receiving, needs to reconnect",

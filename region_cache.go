@@ -881,10 +881,8 @@ func (c *RegionCache) OnSendFail(bo *Backoffer, ctx *RPCContext, scheduleReload 
 			}
 			logutil.Logger(bo.GetCtx()).Info("switch region proxy peer to next due to send request fail",
 				zap.Bool("needReload", scheduleReload),
-				zap.Int("currentIdx", currentProxyIdx),
-				zap.Stringer("currentAddr", currentAddr),
-				zap.Int("nextIdx", nextIdx),
-				zap.Int("nextAddress", addr),
+				zap.String("currentAddr", currentAddr),
+				zap.String("nextAddress", addr),
 				zap.Stringer("current", ctx),
 				zap.Error(err))
 		} else {
